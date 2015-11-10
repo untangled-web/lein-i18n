@@ -65,7 +65,7 @@
                                       '[goog.module.ModuleManager :as module-manager]
                                       '[untangled.i18n.core :as i18n])
                                 (list :import 'goog.module.ModuleManager)) :stream nil)
-        output-dir (:output-dir (:compiler (util/get-cljsbuild (get-in project [:cljsbuild :builds]))))
+        output-dir (:output-dir (:compiler (util/get-cljsbuild (get-in project [:cljsbuild :builds]) (util/target-build project))))
         abs-module-path (str/join (interleave (repeat "/") (drop 2 (str/split output-dir #"/"))))
         manager-def (list 'defonce 'manager (list 'module-manager/getInstance))
         modules-map (reduce #(assoc %1 %2 (str abs-module-path "/" %2 ".js")) {} locales)

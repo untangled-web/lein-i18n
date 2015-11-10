@@ -26,12 +26,12 @@
       (get :exit)
       (> 0)))
 
-(defn cljs-prod-build?
-  [build]
-  (if (= (:id build) "production") build false))
+(defn cljs-build?
+  [build target]
+  (if (= (:id build) target) build false))
 
-(defn get-cljsbuild [builds]
-  (some #(cljs-prod-build? %)
+(defn get-cljsbuild [builds target]
+  (some #(cljs-build? % target)
         builds))
 
 (defn translation-namespace [project]
@@ -43,3 +43,9 @@
   (-> po-filename
       (str/replace #"^([a-z]+_*[A-Z]*).po$" "$1")
       (str/replace #"_" "-")))
+
+(defn target-build [project]
+  (if-let [target (get-in project [:untangled-i18n :target-build])]
+    target
+   "production"))
+

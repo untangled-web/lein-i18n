@@ -35,7 +35,7 @@
   (provided
     "when given a project file, emits a code string"
     (util/translation-namespace project) => "survey.i18n"
-    (util/get-cljsbuild whatever) => {:compiler {:output-dir "res/pub/js/compiled/out"}}
+    (util/get-cljsbuild whatever target) => {:compiler {:output-dir "res/pub/js/compiled/out"}}
     (let [code-string (u/gen-locales-ns {} '("fc-KY"))]
 
       (behavior

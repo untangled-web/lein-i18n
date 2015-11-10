@@ -1,4 +1,4 @@
-(defproject untangled-lein-i18n "0.1.0"
+(defproject untangled-lein-i18n "0.1.1"
   :description "A plugin for extracting/populating transalations for Untangled"
   :url ""
   :license {:name "NAVIS"

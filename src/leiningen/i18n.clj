@@ -48,7 +48,7 @@
   "
   [project locales]
   (let [ns (util/translation-namespace project)
-        build (util/get-cljsbuild (get-in project [:cljsbuild :builds]))
+        build (util/get-cljsbuild (get-in project [:cljsbuild :builds]) (util/target-build project))
         ]
     (if (-> build :compiler (contains? :modules))
       nil
@@ -121,14 +121,16 @@
       (puke "The i18n/msgs directory is missing in your project! Please create it.")
       (let [cljsbuilds-path [:cljsbuild :builds]
             builds (get-in project cljsbuilds-path)
-            cljs-prod-build (util/get-cljsbuild builds)
-            i18n-build (configure-i18n-build cljs-prod-build)
+            cljs-prod-build (util/get-cljsbuild builds (util/target-build project))
+            i18n-exiting-build (util/get-cljsbuild builds "i18n")
+            i18n-build (if i18n-exiting-build i18n-exiting-build (configure-i18n-build cljs-prod-build))
             i18n-project (assoc-in project cljsbuilds-path [i18n-build])
+            build-path (-> i18n-build :compiler :output-to)
             po-files-to-merge (util/find-po-files msgs-dir-path)]
 
         (cljsbuild i18n-project "once" "i18n")
         (sh "xgettext" "--from-code=UTF-8" "--debug" "-k" "-ktr:1" "-ktrc:1c,2" "-ktrf:1" "-o" messages-pot-path
-            compiled-js-path)
+            build-path)
         (doseq [po po-files-to-merge]
           (sh "msgcat" "--no-wrap" messages-pot-path (po-path po) "-o" (po-path po)))))))
 
