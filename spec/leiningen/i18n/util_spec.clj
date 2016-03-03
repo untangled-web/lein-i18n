@@ -68,8 +68,8 @@
   (specification "the cljs-output-dir function"
                  (behavior "returns a path string to the translation-namespace in src"
                            (assertions
-                             (e/cljs-output-dir 'i18n) => "src/i18n"
-                             (e/cljs-output-dir 'i18n.some.more-namespace) => "src/i18n/some/more-namespace"))))
+                             (e/cljs-output-dir "src" 'i18n) => "src/i18n"
+                             (e/cljs-output-dir "src" 'i18n.some.more-namespace) => "src/i18n/some/more-namespace"))))
 
 (specification "the cljsbuild-prod-build? function"
                (behavior "returns false if :id is not \"production\""

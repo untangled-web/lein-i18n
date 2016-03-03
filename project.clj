@@ -5,10 +5,12 @@
             :url  "https://opensource.org/licenses/MIT"}
 
   :dependencies [[org.clojure/clojure "1.7.0"]
-                 [untangled-spec "0.3.1" :scope "test"]
+                 [navis/untangled-spec "0.3.5" :scope "test"]
                  [leiningen-core "2.5.3"]
                  [lein-cljsbuild "1.1.2"]
                  [leiningen "2.5.3"]]
+
+  :plugins [[com.jakemccrary/lein-test-refresh "0.14.0"]]
 
   :source-paths ["src"]
   :test-paths ["spec"]
