@@ -1,4 +1,4 @@
-(defproject navis/untangled-lein-i18n "0.1.2"
+(defproject navis/untangled-lein-i18n "0.1.3-SNAPSHOT"
   :description "A plugin for extracting/populating transalations for Untangled"
   :url ""
   :license {:name "MIT"
