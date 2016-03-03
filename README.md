@@ -118,6 +118,8 @@ your new strings for translation, run this command from the root of your project
 
 `lein i18n extract-strings`
 
+WARNING: RUN cljsbuild on i18n FIRST TO MAKE SURE IT IS WORKING! If you have duplicate externs it might fail.
+
 This will generate a new `messages.pot` in the `i18n/msgs` directory of your project. If you have existing translation
 files in your project (eg: `i18n/msgs/fr_CA.po`), these files will be updated with your new untranslated strings. Any
 existing translations in `fr_CA.po` will be preserved!

@@ -1,6 +1,7 @@
 (ns leiningen.i18n
   (:require [clojure.java.shell :refer [sh]]
             [leiningen.core.main :as lmain]
+            [clojure.string :as string]
             [leiningen.cljsbuild :refer [cljsbuild]]
             [clojure.string :as str]
             [leiningen.i18n.code-gen :as cg]
@@ -63,9 +64,9 @@
                                             :entries   #{(str ns "." %2)}}) {} locales)
             modules-with-main (assoc modules :main main)]
         (-> build
-            (update-in [:compiler] dissoc :main)
-            (assoc-in [:compiler :modules] modules-with-main)
-            (assoc-in [:compiler :optimizations] :advanced))))))
+          (update-in [:compiler] dissoc :main)
+          (assoc-in [:compiler :modules] modules-with-main)
+          (assoc-in [:compiler :optimizations] :advanced))))))
 
 (defn deploy-translations
   "This subtask converts translated .po files into locale-specific .cljs files for runtime string translation."
@@ -109,8 +110,8 @@
             Your production cljsbuild should look something like this:
             ")
           (lmain/warn (pp/write modules-map :stream nil)
-                      "
-                      ")))))
+            "
+            ")))))
 
 (defn extract-strings
   "This subtask extracts strings from your cljs files that should be translated."
@@ -126,11 +127,12 @@
             i18n-build (if i18n-exiting-build i18n-exiting-build (configure-i18n-build cljs-prod-build))
             i18n-project (assoc-in project cljsbuilds-path [i18n-build])
             build-path (-> i18n-build :compiler :output-to)
-            po-files-to-merge (util/find-po-files msgs-dir-path)]
-
-        (cljsbuild i18n-project "once" "i18n")
-        (sh "xgettext" "--from-code=UTF-8" "--debug" "-k" "-ktr:1" "-ktrc:1c,2" "-ktrf:1" "-o" messages-pot-path
-            build-path)
+            po-files-to-merge (util/find-po-files msgs-dir-path)
+            cmd-args (list "xgettext" "--from-code=UTF-8" "--debug" "-k" "-ktr:1" "-ktrc:1c,2" "-ktrf:1" "-o" messages-pot-path build-path)
+            build-result (cljsbuild i18n-project "once" "i18n")
+            _ (lmain/info (str "Build result: " build-result) (str "Running: " (string/join " " cmd-args)))
+            sh-result (apply sh cmd-args)
+            _ (lmain/info (str "Extract result: " sh-result))]
         (doseq [po po-files-to-merge]
           (sh "msgcat" "--no-wrap" messages-pot-path (po-path po) "-o" (po-path po)))))))
 
