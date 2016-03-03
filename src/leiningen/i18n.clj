@@ -73,7 +73,8 @@
   [project]
   (let [replace-hyphen #(str/replace % #"-" "_")
         trans-ns (util/translation-namespace project)
-        output-dir (util/cljs-output-dir trans-ns)
+        src-base (or (-> project :untangled-i18n :source-folder) "src")
+        output-dir (util/cljs-output-dir src-base trans-ns)
         po-files (util/find-po-files msgs-dir-path)
         default-lc (util/default-locale project)
         locales (map util/clojure-ize-locale po-files)

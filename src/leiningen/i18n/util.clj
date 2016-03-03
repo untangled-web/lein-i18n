@@ -2,9 +2,9 @@
   (:require [clojure.java.shell :refer [sh]]
             [clojure.string :as str]))
 
-(defn cljs-output-dir [namespace]
+(defn cljs-output-dir [src-base namespace]
   (let [path-from-namespace (str/replace (str namespace) #"\." "/")]
-    (str "src/" path-from-namespace)))
+    (str src-base "/" path-from-namespace)))
 
 (defn default-locale [project]
   (if-let [locale (get-in project [:untangled-i18n :default-locale])]
