@@ -74,13 +74,13 @@
 (specification "the cljsbuild-prod-build? function"
                (behavior "returns false if :id is not \"production\""
                          (assertions
-                           (e/cljs-prod-build? fixture/dev-build) => false))
+                           (e/cljs-build? fixture/dev-build (e/target-build "x")) => false))
 
                (behavior "returns a build with :id \"production\""
                          (assertions
-                           (e/cljs-prod-build? fixture/prod-build) => fixture/prod-build)))
+                           (e/cljs-build? fixture/prod-build (e/target-build "production")) => fixture/prod-build)))
 
 (specification "the get-cljsbuild function"
                (behavior "returns a production build"
                          (assertions
-                           (e/get-cljsbuild fixture/cljs-builds) => fixture/prod-build)))
+                           (e/get-cljsbuild fixture/cljs-builds (e/target-build "production")) => fixture/prod-build)))

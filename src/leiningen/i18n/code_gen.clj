@@ -57,15 +57,21 @@
 
   Returns a string of cljs code."
   [project locales]
-  (let [locales-ns (-> project util/translation-namespace (str ".locales") symbol)
+  (let [translation-namespace (-> project util/translation-namespace)
+        locales-ns (-> translation-namespace (str ".locales") symbol)
+        translations (map #(symbol ( str translation-namespace "." %)) locales)
         ns-decl (pp/write (list 'ns locales-ns
-                                (list :require
-                                      'goog.module
-                                      'goog.module.ModuleLoader
-                                      '[goog.module.ModuleManager :as module-manager]
-                                      '[untangled.i18n.core :as i18n])
+                                (concat
+                                  (list :require
+                                        'goog.module
+                                        'goog.module.ModuleLoader
+                                        '[goog.module.ModuleManager :as module-manager]
+                                        '[untangled.i18n.core :as i18n]
+                                        )
+                                  translations
+                                  )
                                 (list :import 'goog.module.ModuleManager)) :stream nil)
-        output-dir (:output-dir (:compiler (util/get-cljsbuild (get-in project [:cljsbuild :builds]))))
+        output-dir (:output-dir (:compiler (util/get-cljsbuild (get-in project [:cljsbuild :builds]) (util/target-build project))))
         abs-module-path (str/join (interleave (repeat "/") (drop 2 (str/split output-dir #"/"))))
         manager-def (list 'defonce 'manager (list 'module-manager/getInstance))
         modules-map (reduce #(assoc %1 %2 (str abs-module-path "/" %2 ".js")) {} locales)
@@ -78,15 +84,14 @@
                                                  (list '.setAllModuleInfo 'manager 'module-info)
                                                  (list '.setModuleUris 'manager 'modules)
                                                  'loader)) :pretty false :stream nil)
-        set-locale-def (list 'defn 'set-locale ['op 'l]
+        set-locale-def (list 'defn 'set-locale ['l]
                              (list 'js/console.log (list 'str "LOADING ALTERNATE LOCALE: " 'l))
                              (list 'if (list 'exists? 'js/i18nDevMode)
                                    (list 'do (list 'js/console.log (list 'str "LOADED ALTERNATE LOCALE in dev mode: " 'l))
                                          (list 'reset! 'i18n/*current-locale* 'l)
-                                         (list (list 'op (symbol "#(assoc % :application/locale l)"))))
+                                         )
                                    (list '.execOnLoad 'manager 'l
                                          (list 'fn 'after-locale-load []
                                                (list 'js/console.log (list 'str "LOADED ALTERNATE LOCALE: " 'l))
-                                               (list 'reset! 'i18n/*current-locale* 'l)
-                                               (list (list 'op (symbol "#(assoc % :application/locale l)")))))))]
+                                               (list 'reset! 'i18n/*current-locale* 'l)))))]
     (str/join "\n\n" [ns-decl manager-def modules-def mod-info-def loader-def set-locale-def])))

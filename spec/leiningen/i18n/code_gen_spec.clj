@@ -35,9 +35,8 @@
   (provided
     "when given a project file, emits a code string"
     (util/translation-namespace project) => "survey.i18n"
-    (util/get-cljsbuild whatever) => {:compiler {:output-dir "res/pub/js/compiled/out"}}
-    (let [code-string (u/gen-locales-ns {} '("fc-KY"))]
-
+    (util/get-cljsbuild whatever target) => {:compiler {:output-dir "res/pub/js/compiled/out"}}
+    (let [code-string (u/gen-locales-ns {} '("es-MX" "fc-KY") )]
       (behavior
         "that begins with configurable namespace declaration"
         (assertions
@@ -46,18 +45,18 @@
       (behavior
         "that contains a javascript map of locales to corresponding .js files in the output directory"
         (assertions
-          (last (re-matches #"(?ms).*(\{\"fc-KY\" \"/js/compiled/out/fc-KY.js\"\}).*"
-                            code-string)) => "{\"fc-KY\" \"/js/compiled/out/fc-KY.js\"}")
+          (last (re-matches #"(?ms).*(\"fc-KY\" \"/js/compiled/out/fc-KY.js\").*"
+                            code-string)) => "\"fc-KY\" \"/js/compiled/out/fc-KY.js\"")
         (behavior
           "which is then def-once'd to the modules symbol"
           (assertions
-            (last (re-matches #"(?ms).*(\(defonce modules #js).*" code-string)) => "(defonce modules #js")))
+            (last (re-matches #"(?ms).*(\(defonce\n modules\n #js).*" code-string)) => "(defonce\n modules\n #js")))
 
       (behavior
         "that contains a javascript map of locales to an empty vector"
         (assertions
-          (last (re-matches #"(?ms).*(\{\"fc-KY\" \[\]\}).*"
-                            code-string)) => "{\"fc-KY\" []}")
+          (last (re-matches #"(?ms).*(\{\"es-MX\" \[\], \"fc-KY\" \[\]\}).*"
+                            code-string)) => "{\"es-MX\" [], \"fc-KY\" []}")
         (behavior
           "which is then def-once'd to the module-info symbol"
           (assertions
