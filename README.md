@@ -102,7 +102,7 @@ Also, make sure that the project you are going to leverage the gettext against h
 
 ### Configure Plugin
 
-Add `[untangled-lein-i18n "0.1.2"]` to the `:plugins` list in `project.clj`.
+Add `[navis/untangled-lein-i18n "0.1.2"]` to the `:plugins` list in `project.clj`.
 
 The i18n plugin will look for configuration options at the `:untangled-i18n` key in your `project.clj`:
 
