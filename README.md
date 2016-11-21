@@ -192,4 +192,4 @@ The generated code will include a `locales` namespace. Just require that and use
 (l/set-locale \"es\") ; change the UI locale, possibly triggering a dynamic module load.
 ```
 
-See the Untangled Developer's Guide for more information.
+See the [Untangled Developer's Guide](http://untangled-web.github.io/untangled/guide.html#!/untangled_devguide.L_Internationalization) for more information.
