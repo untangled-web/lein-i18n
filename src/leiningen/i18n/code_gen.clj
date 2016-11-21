@@ -1,7 +1,8 @@
 (ns leiningen.i18n.code-gen
   (:require [clojure.string :as str]
             [clojure.pprint :as pp]
-            [leiningen.i18n.util :as util]))
+            [leiningen.i18n.util :as util]
+            [leiningen.core.main :as lmain]))
 
 (defn wrap-with-swap
   "Wrap a translation map with supporting clojurescript code
@@ -21,12 +22,15 @@
         trans-def (pp/write (list 'def 'translations translation) :stream nil)
         swap-decl (pp/write (list 'swap! 'untangled.i18n.core/*loaded-translations*
                                   (list 'fn '[x] (list 'assoc 'x locale 'translations))) :stream nil)
-        goog-module-decl (pp/write (list 'if (list 'exists? 'js/i18nDevMode)
-                                         :noop
-                                         (list '-> 'goog.module.ModuleManager '.getInstance (list '.setLoaded locale))) :stream nil)]
+        goog-module-decl (pp/write '(try
+                                      (-> goog.module.ModuleManager
+                                          .getInstance
+                                          (.setLoaded locale))
+                                      (catch js/Object e)) :stream nil)]
     (str/join "\n\n" [ns-decl comment trans-def swap-decl goog-module-decl])))
 
 (defn write-cljs-translation-file [fname translations-string]
+  (lmain/info "Writing " fname)
   (spit fname translations-string))
 
 (defn gen-default-locale-ns
@@ -49,49 +53,54 @@
 (defn gen-locales-ns
   "
   Generates a code string that assists in dynamically loading translations when a user changes their locale. Uses the
-  leiningen project map to configure the code string's namespace as well as the output directory for locale modules.
+  i18n settings to configure the code string's namespace as well as the output directory for locale modules.
 
   Parameters:
-  * `project`: A leiningen project map
+  * `settings`: A leiningen project map
   * `locales`: A list of locale strings
 
   Returns a string of cljs code."
-  [project locales]
-  (let [translation-namespace (-> project util/translation-namespace)
+  [settings locales]
+  (let [translation-namespace (:translation-namespace settings)
         locales-ns (-> translation-namespace (str ".locales") symbol)
-        translations (map #(symbol ( str translation-namespace "." %)) locales)
+        xns (fn [locale] (symbol (str translation-namespace "." locale)))
+        locale-modules (:translation-modules settings)
+        supports-modules? (boolean (seq locale-modules))
+        is-module? (fn [l] (contains? locale-modules l))
+        translations-to-include (reduce (fn [acc l]
+                                          (if (is-module? l) acc (conj acc (xns l))))
+                                        #{(xns (:default-locale settings))} locales)
         ns-decl (pp/write (list 'ns locales-ns
                                 (concat
                                   (list :require
                                         'goog.module
                                         'goog.module.ModuleLoader
                                         '[goog.module.ModuleManager :as module-manager]
-                                        '[untangled.i18n.core :as i18n]
-                                        )
-                                  translations
-                                  )
+                                        '[untangled.i18n.core :as i18n])
+                                  translations-to-include)
                                 (list :import 'goog.module.ModuleManager)) :stream nil)
-        output-dir (:output-dir (:compiler (util/get-cljsbuild (get-in project [:cljsbuild :builds]) (util/target-build project))))
-        abs-module-path (str/join (interleave (repeat "/") (drop 2 (str/split output-dir #"/"))))
+        abs-module-path (:module-server-path settings)
         manager-def (list 'defonce 'manager (list 'module-manager/getInstance))
         modules-map (reduce #(assoc %1 %2 (str abs-module-path "/" %2 ".js")) {} locales)
         modules-def (pp/write (list 'defonce 'modules (symbol (str "#js")) modules-map) :stream nil)
         mod-info-map (reduce #(assoc %1 %2 []) {} locales)
         mod-info-def (list 'defonce 'module-info (symbol (str "#js")) mod-info-map)
         loader-def (pp/write (list 'defonce (symbol "^:export")
-                                   'loader (list 'let ['loader (list 'goog.module.ModuleLoader.)]
-                                                 (list '.setLoader 'manager 'loader)
-                                                 (list '.setAllModuleInfo 'manager 'module-info)
-                                                 (list '.setModuleUris 'manager 'modules)
-                                                 'loader)) :pretty false :stream nil)
-        set-locale-def (list 'defn 'set-locale ['l]
-                             (list 'js/console.log (list 'str "LOADING ALTERNATE LOCALE: " 'l))
-                             (list 'if (list 'exists? 'js/i18nDevMode)
-                                   (list 'do (list 'js/console.log (list 'str "LOADED ALTERNATE LOCALE in dev mode: " 'l))
-                                         (list 'reset! 'i18n/*current-locale* 'l)
-                                         )
-                                   (list '.execOnLoad 'manager 'l
-                                         (list 'fn 'after-locale-load []
-                                               (list 'js/console.log (list 'str "LOADED ALTERNATE LOCALE: " 'l))
-                                               (list 'reset! 'i18n/*current-locale* 'l)))))]
-    (str/join "\n\n" [ns-decl manager-def modules-def mod-info-def loader-def set-locale-def])))
+                                   'loader '(let [loader (goog.module.ModuleLoader.)]
+                                              (.setLoader manager loader)
+                                              (.setAllModuleInfo manager module-info)
+                                              (.setModuleUris manager modules)
+                                              loader)) :stream nil)
+        set-locale-def (if supports-modules?
+                         (list 'defn (symbol "^:export") 'set-locale '[l]
+                               '(reset! i18n/*current-locale* l)
+                               '(try
+                                  (.execOnLoad manager l
+                                               (fn after-locale-load []
+                                                 (reset! i18n/*current-locale* l)))
+                                  (catch js/Object e)))
+                         (list 'defn (symbol "^:export") 'set-locale '[l] '(reset! i18n/*current-locale* l)))]
+    (str/join "\n\n"
+              (if supports-modules?
+                [ns-decl manager-def modules-def mod-info-def loader-def set-locale-def]
+                [ns-decl set-locale-def]))))

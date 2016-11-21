@@ -2,148 +2,160 @@
   (:require [clojure.java.shell :refer [sh]]
             [leiningen.core.main :as lmain]
             [clojure.string :as string]
-            [leiningen.cljsbuild :refer [cljsbuild]]
             [clojure.string :as str]
+            [clojure.java.io :as io]
             [leiningen.i18n.code-gen :as cg]
             [leiningen.i18n.parse-po :as parse]
-            [leiningen.i18n.util :as util]
-            [clojure.pprint :as pp]))
+            [leiningen.i18n.util :as util :refer [puke po-path]]
+            [clojure.pprint :as pp])
+  (:import (java.io File)))
 
-(def msgs-dir-path "i18n/msgs")
-(def messages-pot-path (str msgs-dir-path "/messages.pot"))
-(def compiled-js-path "i18n/out/compiled.js")
+(def i18n-defaults
+  {:default-locale        "en"
+   :translation-namespace "untangled.translations"
+   :source-folder         nil
+   :translation-build     "i18n"
+   :production-build      "production"
+   :po-files              "i18n/msgs"})
 
-(defn- po-path [po-file] (str msgs-dir-path "/" po-file))
+(defn check-i18n-build! [nm build]
+  (when (nil? build)
+    (puke "The specified translation build (" nm ") does not exist in the project file."))
+  (when (nil? (get-in build [:compiler :output-to]))
+    (puke "The translation build (" nm ") has no :output-to setting."))
+  (when-not (#{:whitespace :simple} (get-in build [:compiler :optimizations]))
+    (puke "The translation build (" nm ") should specify optimizations of :whitespace or :simple")))
 
-(defn- puke [msg]
-  (lmain/warn msg)
-  (lmain/abort))
+(defn check-production-build! [nm build]
+  (when (nil? build)
+    (puke "The specified production build (" nm ") does not exist in the project file."))
+  (when (nil? (get-in build [:compiler :output-dir]))
+    (puke "The production build (" nm ") has no :output-to setting."))
+  (when-not (#{:whitespace :simple :advanced} (get-in build [:compiler :optimizations]))
+    (puke "The production build (" nm ") should specify optimizations of :whitespace, :simple, or :advanced"))
+  (when-not (get-in build [:compiler :modules])
+    (lmain/warn "The production build (" nm ") does not specify modules. Your program will have to require all translations at the top level to compile them all in.")))
 
-(defn configure-i18n-build
+(defn setup-environment!
+  "Check and setup the environment. Returns a subset of settings pertaining to the filesystem:
+
+  :messages-pot The full path to the messages.pot (generated) file
+  :po-dir a File object representing the po directory for translation files."
+  [settings]
+  (when (or (nil? (:source-folder settings))
+            (not (.exists (io/as-file (:source-folder settings)))))
+    (puke "The configured target folder [:untangled-i18n :source-folder] for translation cljs sources ("
+          (:source-folder settings) ") is not set or does not exist."))
+  (when (util/gettext-missing?)
+    (puke "The xgettext and msgmerge commands are not installed, or are not on your $PATH."))
+  (let [po-files (:po-files settings)
+        po-dir ^File (io/as-file po-files)]
+    (when (not (.exists po-dir))
+      (lmain/warn "Creating missing PO directory: " po-files)
+      (.mkdirs po-dir))
+    (when (not (.isDirectory po-dir))
+      (puke po-files " is NOT a directory!"))
+    {:po-dir       po-dir
+     :messages-pot (.getAbsolutePath (new File po-dir "messages.pot"))}))
+
+(defn check-settings!
+  "Verify that the project configured settings are all present, or that the defaults make sense. Returns settings
+  with various additional things set from the environment and project file:
+
+  :translation-js will be the path to the Javascript output of the i18n build
   "
-  Create an in-memory clsjbuild configuration.
+  [settings builds]
+  (let [i18n-build-name (:translation-build settings)
+        prod-build-name (:production-build settings)
+        i18n-build (util/get-cljsbuild builds i18n-build-name)
+        production-build (util/get-cljsbuild builds prod-build-name)
+        module-basepath (or (-> production-build :compiler :asset-path) "/")
+        trans-ns (:translation-namespace settings)
+        module-server-path (util/cljs-output-dir module-basepath trans-ns)
+        src-base (:source-folder settings)
+        output-dir (util/cljs-output-dir src-base trans-ns)
+        outdir ^File (io/as-file output-dir)
+        translation-modules (->> production-build :compiler :modules keys (map name) set)
+        updated-settings (merge settings
+                                {:translation-target  output-dir
+                                 :translation-modules translation-modules
+                                 :module-server-path  module-server-path
+                                 :translation-js      (get-in i18n-build [:compiler :output-to])}
+                                (setup-environment! settings))]
+    (when (not (.exists outdir))
+      (lmain/info "Making missing source folder " outdir)
+      (.mkdirs outdir))
+    (lmain/info "The following locales will be written as loadable modules: " translation-modules)
+    (lmain/info "Locale modules (if used) will be built to load from the server path: " module-server-path)
+    (lmain/info "Translation build: " i18n-build-name)
+    (check-i18n-build! i18n-build-name i18n-build)
+    (check-production-build! prod-build-name production-build)
+    (lmain/info "Settings for i18n: " updated-settings)
+    updated-settings))
 
-  Parameters:
-  * `build` - a [:cljsbuild :builds] map
-
-  Returns a new cljsbuild configuration that will ensure all cljs is compiled into a single JS file, from which we will
-  extract translatable strings.
-  "
-  [build]
-  (let [compiler-config (assoc (:compiler build) :output-dir "i18n/out"
-                                                 :optimizations :whitespace
-                                                 :output-to compiled-js-path)]
-    (assoc build :id "i18n" :compiler compiler-config)))
-
-
-
-(defn lookup-modules
-  "
-  Check if the production cljs build contains a :modules configuration map.
-
-  Parameters:
-  * `project` - a leiningen project map
-  * `locales` - a list of locale strings
-
-  If the production cljs build has :modules, return nil, else return the suggested :modules configuration.
-  "
-  [project locales]
-  (let [ns (util/translation-namespace project)
-        build (util/get-cljsbuild (get-in project [:cljsbuild :builds]) (util/target-build project))
-        ]
-    (if (-> build :compiler (contains? :modules))
-      nil
-      (let [output-dir (:output-dir (:compiler build))
-            js-file #(str output-dir "/" % ".js")
-            name (:name project)
-            main-name (str name ".main")
-            main {:output-to (js-file name)
-                  :entries   #{main-name}}
-            modules (reduce #(assoc %1
-                              (keyword %2) {:output-to (js-file %2)
-                                            :entries   #{(str ns "." %2)}}) {} locales)
-            modules-with-main (assoc modules :main main)]
-        (-> build
-          (update-in [:compiler] dissoc :main)
-          (assoc-in [:compiler :modules] modules-with-main)
-          (assoc-in [:compiler :optimizations] :advanced))))))
+(defn extract-strings
+  "This subtask extracts strings from your cljs files that should be translated."
+  [project]
+  (let [explicit-settings (get project :untangled-i18n {})
+        builds (get-in project [:cljsbuild :builds])
+        settings-with-defaults (merge i18n-defaults explicit-settings)
+        settings (check-settings! settings-with-defaults builds)
+        messages-pot-path (:messages-pot settings)
+        js-path (:translation-js settings)
+        po-files-to-merge (util/find-po-files (:po-files settings))]
+    (util/build project (:translation-build settings))
+    (util/run "xgettext" "--from-code=UTF-8" "--debug" "-k" "-ktr:1" "-ktrc:1c,2" "-ktrf:1" "-o" messages-pot-path js-path)
+    (doseq [po po-files-to-merge]
+      (when (.exists (io/as-file (po-path settings po)))
+        (lmain/info "Merging new template to existing translations for " po)
+        (util/run "msgmerge" "--force-po" "--no-wrap" "-U" (po-path settings po) messages-pot-path)))))
 
 (defn deploy-translations
   "This subtask converts translated .po files into locale-specific .cljs files for runtime string translation."
   [project]
-  (let [replace-hyphen #(str/replace % #"-" "_")
-        trans-ns (util/translation-namespace project)
-        src-base (or (-> project :untangled-i18n :source-folder) "src")
-        output-dir (util/cljs-output-dir src-base trans-ns)
-        po-files (util/find-po-files msgs-dir-path)
-        default-lc (util/default-locale project)
+  (let [explicit-settings (get project :untangled-i18n {})
+        builds (get-in project [:cljsbuild :builds])
+        settings-with-defaults (merge i18n-defaults explicit-settings)
+        settings (check-settings! settings-with-defaults builds)
+        replace-hyphen #(str/replace % #"-" "_")
+        trans-ns (:translation-namespace settings)
+        output-dir (:translation-target settings)
+        po-files (util/find-po-files (:po-files settings))
+        default-lc (:default-locale settings)
         locales (map util/clojure-ize-locale po-files)
         locales-inc-default (conj locales default-lc)
         default-lc-translation-path (str output-dir "/" (replace-hyphen default-lc) ".cljs")
         default-lc-translations (cg/wrap-with-swap :namespace trans-ns :locale default-lc :translation {})
-        locales-code-string (cg/gen-locales-ns project locales)
+        locales-code-string (cg/gen-locales-ns settings locales)
         locales-path (str output-dir "/locales.cljs")
         default-locale-code-string (cg/gen-default-locale-ns trans-ns default-lc)
         default-locale-path (str output-dir "/default_locale.cljs")]
-    (sh "mkdir" "-p" output-dir)
+
     (cg/write-cljs-translation-file default-locale-path default-locale-code-string)
     (if (some #{default-lc} locales)
       (cg/write-cljs-translation-file locales-path locales-code-string)
-      (let [locales-code-string (cg/gen-locales-ns project locales-inc-default)]
+      (let [locales-code-string (cg/gen-locales-ns settings locales-inc-default)]
         (cg/write-cljs-translation-file locales-path locales-code-string)
         (cg/write-cljs-translation-file default-lc-translation-path default-lc-translations)))
     (lmain/warn "Configured project for default locale:" default-lc)
 
     (doseq [po po-files]
       (let [locale (util/clojure-ize-locale po)
-            translation-map (parse/map-translations (po-path po))
+            translation-map (parse/map-translations (po-path settings po))
             cljs-translations (cg/wrap-with-swap
                                 :namespace trans-ns :locale locale :translation translation-map)
             cljs-trans-path (str output-dir "/" (replace-hyphen locale) ".cljs")]
         (cg/write-cljs-translation-file cljs-trans-path cljs-translations)))
 
-    (lmain/warn "Deployed translations for the following locales:" locales)
-
-    (if-let [modules-map (lookup-modules project locales-inc-default)]
-      (do (lmain/warn
-            "
-            No :modules configuration detected for dynamically loading translations!
-            Your production cljsbuild should look something like this:
-            ")
-          (lmain/warn (pp/write modules-map :stream nil)
-            "
-            ")))))
-
-(defn extract-strings
-  "This subtask extracts strings from your cljs files that should be translated."
-  [project]
-  (if (util/gettext-missing?)
-    (puke "The xgettext and msgcat commands are not installed, or not on your $PATH.")
-    (if (util/dir-missing? msgs-dir-path)
-      (puke "The i18n/msgs directory is missing in your project! Please create it.")
-      (let [cljsbuilds-path [:cljsbuild :builds]
-            builds (get-in project cljsbuilds-path)
-            cljs-prod-build (util/get-cljsbuild builds (util/target-build project))
-            i18n-exiting-build (util/get-cljsbuild builds "i18n")
-            i18n-build (if i18n-exiting-build i18n-exiting-build (configure-i18n-build cljs-prod-build))
-            i18n-project (assoc-in project cljsbuilds-path [i18n-build])
-            build-path (-> i18n-build :compiler :output-to)
-            po-files-to-merge (util/find-po-files msgs-dir-path)
-            cmd-args (list "xgettext" "--from-code=UTF-8" "--debug" "-k" "-ktr:1" "-ktrc:1c,2" "-ktrf:1" "-o" messages-pot-path build-path)
-            build-result (cljsbuild i18n-project "once" "i18n")
-            _ (lmain/info (str "Build result: " build-result) (str "Running: " (string/join " " cmd-args)))
-            sh-result (apply sh cmd-args)
-            _ (lmain/info (str "Extract result: " sh-result))]
-        (doseq [po po-files-to-merge]
-          (sh "msgcat" "--no-wrap" messages-pot-path (po-path po) "-o" (po-path po)))))))
+    (lmain/info "Deployed translations for the following locales:" locales)))
 
 (defn i18n
   "A plugin which automates your i18n string translation workflow"
   {:subtasks [#'extract-strings #'deploy-translations]}
   ([project]
-   (puke "Bad you!"))
+   (puke "Usage: lein i18n (extract-strings | deploy-translations)"))
   ([project subtask]
    (case subtask
      "extract-strings" (extract-strings project)
      "deploy-translations" (deploy-translations project)
-     (puke (str "Unrecognized subtask: " subtask)))))
+     (puke "Unrecognized subtask:" subtask "\n Use 'extract-strings' or 'deploy-translations'."))))

@@ -1,11 +1,13 @@
 # Untangled Internationalization
 
+<img src="https://img.shields.io/clojars/v/navis/untangled-lein-i18n.svg">
+
+Release: <img src="https://api.travis-ci.org/untangled-web/untangled-lein-i18n.svg?branch=master">
+Snapshot: <img src="https://api.travis-ci.org/untangled-web/untangled-lein-i18n.svg?branch=develop">
+
 WARNING: This plugin is in progress. It mostly works, but the following bits need a bit of work:
 
 - Safari support requires a polyfill
-- Dev mode support is fine, but production mode isn't ready
-- Module support is almost ready, but needs tuning
-
 
 The internationalization support in Untangled is based on a number of tools to give a fully-functional, bi-directional
 localization and internationalization solution that includes:
@@ -102,29 +104,44 @@ Also, make sure that the project you are going to leverage the gettext against h
 
 ### Configure Plugin
 
-Add `[navis/untangled-lein-i18n "0.1.2"]` to the `:plugins` list in `project.clj`.
+Add `[navis/untangled-lein-i18n "0.2.0"]` to the `:plugins` list in `project.clj`.
 
 The i18n plugin will look for configuration options at the `:untangled-i18n` key in your `project.clj`:
 
-        :untangled-i18n {:default-locale        "en-US"
-                         :translation-namespace survey.i18n
-                         :source-folder         "src/client"
-                         :target-build          "prod"
-                         }
+    :plugins [navis/untangled-lein-i18n \"0.2.0\"]
 
-`:default-locale` is the locale you would like your users to see initially, defaults to `"en-US"`
+    :untangled-i18n {:default-locale        \"en\" ;; the default locale of your app
+                     :translation-namespace \"app.i18n\" ;; the namespace for generating cljs translations
+                     :source-folder         \"src\" ;; the target source folder for generated code
+                     :translation-build     \"i18n\" ;; The name of the cljsbuild to compile your code that has tr calls
+                     :po-files              \"msgs\" ;; The folder where you want to store gettext files  (.po/.pot)
+                     :production-build      \"prod\"} ;; The name of your production build
 
-`:source-folder` is the location that the plugin should write the `cljs` files during `deploy-translations`. It defaults to `src`.
+    ; You need to have a build for generating an i18n source file for string extraction, and one for generating the
+    ; final production application. You cannot use :advanced optimizations for the i18n step, but must at least use :whitespace
+    ; so you get a single file. See the Developer's Guide for more details on Internationalization configuration.
+    :cljsbuild {:builds [{:id           \"i18n\"
+                          :source-paths [\"src\"]
+                          :compiler     {:output-to     \"i18n/out/compiled.js\"
+                                         :main          entry-point
+                                         :optimizations :whitespace}}
+                         {:id \"prod\"
+                          :source-paths [\"src\"]
+                          :compiler {:asset-path    \"js\"
+                                     :output-dir \"resources/public/js\"
+                                     :optimizations :advanced
+                                     :source-map    true
+                                     :modules       {;; The main program
+                                                     :cljs-base {:output-to \"resources/public/js/main.js \"}
+                                                     ;; One entry for each locale
+                                                     :de        {:output-to \"resources/public/js/de.js \" :entries #{\"app.i18n.de \"}}
+                                                     :es        {:output-to \"resources/public/js/es.js \" :entries #{\"app.i18n.es \"}}}}}]})
 
-`:translation-namespace` is the clojure/clojurescript namespace in which the plugin will deploy translations and
-supporting code files. The plugin will create a corresponding directory path if one does not exist. A new subdirectory
-will be created after each `.` in the namespace.
-
-So, the above configuration will generate the following files:
+So, the above configuration (when used) will generate the following files:
 
 ```
-src/client/
-└── survey
+src/
+└── app
     ├── i18n
     │   ├── default_locale.cljs   ; The default locale translations
     │   ├── en_US.cljs            ; A file per locale (used for module loading of translations)
@@ -162,52 +179,17 @@ project:
 
 You now should be able to see the new translations in your app!
 
+### Using the Translations
 
-## Dynamic Translation Loading
-
-Translations are dynamically loaded when the user requests a change to their locale. The leiningen plugin generates
-clojurescript code to support this dynamic loading, but there some requirements your project must meet in order to
-support this.
-
-### :require Supporting Namespaces
-
-Your `main` namespace should `:require` the `default-locale` namespaces which was generated by the
-i18n plugin, eg:
-
-         (ns survey.main
-           (:require [survey.core :as c]
-                     survey.i18n.default-locale
-                     [untangled.i18n.core :as i18n]))
-
-### Configure :modules in cljsbuild
-
-Your production cljsbuild configuration should contain a `:modules` entry which configures support for `goog.module`
-to dynamically load JS modules on request. The i18n plugin will detect if your project is missing the `:modules` entry,
-and print the suggested configuration. Note that the i18n plugin will not check the correctness of an existing `:modules`
-config!
-
-WARNING: Module loading isn't quite done. The main logic is there, but re-render after load needs to be implemented, and Closure advanced optimizations are not working well yet.
-
-### Static Translation Loading in Dev Mode
-
-TODO: This can be fixed so this isn't required...just need to make time.
-
-When developing your project you may want to test in other locales. Make sure your project has the following:
-
-- set a javascript variable called `i18nDevMode`, before your app `<div>` is loaded in index.html:
-
-        <script>i18nDevMode = true;</script>
-
-which will bypass the module loading logic (and prevent the resulting runtime errors).
-
-## Set Locale at Run-time
-
-In your application, make sure you've following the untangled client instructions on forced re-render (which uses :react-key).
-
-In your application make a drop-down that can select your supported locales, and transact:
+The generated code will include a `locales` namespace. Just require that and use the generated
+`set-locale` function (e.g. in your UI).
 
 ```
-(om/transact! this '[(app/change-locale { :lang "en-US" })])
-(om/transact! this '[(app/change-locale { :lang "es-MX" })])
+(ns some.ui
+ (:require [app.i18n.locales :as l]))
+
 ...
+(l/set-locale \"es\") ; change the UI locale, possibly triggering a dynamic module load.
 ```
+
+See the Untangled Developer's Guide for more information.

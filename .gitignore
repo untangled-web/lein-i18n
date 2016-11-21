@@ -21,3 +21,4 @@ target
 .lein-env
 examples/calendar/resources/public/js/specs
 examples/todo/src/quiescent_model
+pom.xml.asc
