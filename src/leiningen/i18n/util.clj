@@ -12,7 +12,9 @@
 (defn po-path [settings po-file] (.getAbsolutePath (new File (:po-dir settings) po-file)))
 
 (defn cljs-output-dir [src-base namespace]
-  (let [path-from-namespace (str/replace (str namespace) #"\." "/")]
+  (let [path-from-namespace (-> (str namespace)
+                                (str/replace #"\." "/")
+                                (str/replace #"-" "_"))]
     (str src-base "/" path-from-namespace)))
 
 (defn find-po-files [msgs-dir-path]

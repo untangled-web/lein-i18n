@@ -22,9 +22,11 @@
         trans-def (pp/write (list 'def 'translations translation) :stream nil)
         swap-decl (pp/write (list 'swap! 'untangled.i18n.core/*loaded-translations*
                                   (list 'fn '[x] (list 'assoc 'x locale 'translations))) :stream nil)
-        goog-module-decl (pp/write (list 'if (list 'exists? 'js/i18nDevMode)
-                                         :noop
-                                         (list '-> 'goog.module.ModuleManager '.getInstance (list '.setLoaded locale))) :stream nil)]
+        goog-module-decl (pp/write '(try
+                                      (-> goog.module.ModuleManager
+                                          .getInstance
+                                          (.setLoaded locale))
+                                      (catch js/Object e)) :stream nil)]
     (str/join "\n\n" [ns-decl comment trans-def swap-decl goog-module-decl])))
 
 (defn write-cljs-translation-file [fname translations-string]
@@ -61,33 +63,44 @@
   [settings locales]
   (let [translation-namespace (:translation-namespace settings)
         locales-ns (-> translation-namespace (str ".locales") symbol)
-        translations (map #(symbol (str translation-namespace "." %)) locales)
+        xns (fn [locale] (symbol (str translation-namespace "." locale)))
+        locale-modules (:translation-modules settings)
+        supports-modules? (boolean (seq locale-modules))
+        is-module? (fn [l] (contains? locale-modules l))
+        translations-to-include (reduce (fn [acc l]
+                                          (if (is-module? l) acc (conj acc (xns l))))
+                                        #{(xns (:default-locale settings))} locales)
         ns-decl (pp/write (list 'ns locales-ns
                                 (concat
                                   (list :require
                                         'goog.module
                                         'goog.module.ModuleLoader
                                         '[goog.module.ModuleManager :as module-manager]
-                                        '[untangled.i18n.core :as i18n]
-                                        )
-                                  translations)
+                                        '[untangled.i18n.core :as i18n])
+                                  translations-to-include)
                                 (list :import 'goog.module.ModuleManager)) :stream nil)
-        abs-module-path (:module-basepath settings)
+        abs-module-path (:module-server-path settings)
         manager-def (list 'defonce 'manager (list 'module-manager/getInstance))
         modules-map (reduce #(assoc %1 %2 (str abs-module-path "/" %2 ".js")) {} locales)
         modules-def (pp/write (list 'defonce 'modules (symbol (str "#js")) modules-map) :stream nil)
         mod-info-map (reduce #(assoc %1 %2 []) {} locales)
         mod-info-def (list 'defonce 'module-info (symbol (str "#js")) mod-info-map)
         loader-def (pp/write (list 'defonce (symbol "^:export")
-                                   'loader (list 'let ['loader (list 'goog.module.ModuleLoader.)]
-                                                 (list '.setLoader 'manager 'loader)
-                                                 (list '.setAllModuleInfo 'manager 'module-info)
-                                                 (list '.setModuleUris 'manager 'modules)
-                                                 'loader)) :pretty true :stream nil)
-        set-locale-def (list 'defn (symbol "^:export") 'set-locale ['l]
-                             (list 'if (list 'exists? 'js/i18nDevMode)
-                                   (list 'reset! 'i18n/*current-locale* 'l)
-                                   (list '.execOnLoad 'manager 'l
-                                         (list 'fn 'after-locale-load []
-                                               (list 'reset! 'i18n/*current-locale* 'l)))))]
-    (str/join "\n\n" [ns-decl manager-def modules-def mod-info-def loader-def set-locale-def])))
+                                   'loader '(let [loader (goog.module.ModuleLoader.)]
+                                              (.setLoader manager loader)
+                                              (.setAllModuleInfo manager module-info)
+                                              (.setModuleUris manager modules)
+                                              loader)) :stream nil)
+        set-locale-def (if supports-modules?
+                         (list 'defn (symbol "^:export") 'set-locale '[l]
+                               '(reset! i18n/*current-locale* l)
+                               '(try
+                                  (.execOnLoad manager l
+                                               (fn after-locale-load []
+                                                 (reset! i18n/*current-locale* l)))
+                                  (catch js/Object e)))
+                         (list 'defn (symbol "^:export") 'set-locale '[l] '(reset! i18n/*current-locale* l)))]
+    (str/join "\n\n"
+              (if supports-modules?
+                [ns-decl manager-def modules-def mod-info-def loader-def set-locale-def]
+                [ns-decl set-locale-def]))))

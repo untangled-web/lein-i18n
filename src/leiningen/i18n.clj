@@ -29,7 +29,7 @@
 (defn check-production-build! [nm build]
   (when (nil? build)
     (puke "The specified production build (" nm ") does not exist in the project file."))
-  (when (nil? (get-in build [:compiler :output-to]))
+  (when (nil? (get-in build [:compiler :output-dir]))
     (puke "The production build (" nm ") has no :output-to setting."))
   (when-not (#{:whitespace :simple :advanced} (get-in build [:compiler :optimizations]))
     (puke "The production build (" nm ") should specify optimizations of :whitespace, :simple, or :advanced"))
@@ -71,18 +71,22 @@
         production-build (util/get-cljsbuild builds prod-build-name)
         module-basepath (or (-> production-build :compiler :asset-path) "/")
         trans-ns (:translation-namespace settings)
+        module-server-path (util/cljs-output-dir module-basepath trans-ns)
         src-base (:source-folder settings)
         output-dir (util/cljs-output-dir src-base trans-ns)
         outdir ^File (io/as-file output-dir)
+        translation-modules (->> production-build :compiler :modules keys (map name) set)
         updated-settings (merge settings
-                                {:translation-target output-dir
-                                 :module-basepath    module-basepath
-                                 :translation-js     (get-in i18n-build [:compiler :output-to])}
+                                {:translation-target  output-dir
+                                 :translation-modules translation-modules
+                                 :module-server-path  module-server-path
+                                 :translation-js      (get-in i18n-build [:compiler :output-to])}
                                 (setup-environment! settings))]
     (when (not (.exists outdir))
       (lmain/info "Making missing source folder " outdir)
       (.mkdirs outdir))
-    (lmain/info "Locale modules will be build to load relative to asset path: " module-basepath)
+    (lmain/info "The following locales will be written as loadable modules: " translation-modules)
+    (lmain/info "Locale modules (if used) will be built to load from the server path: " module-server-path)
     (lmain/info "Translation build: " i18n-build-name)
     (check-i18n-build! i18n-build-name i18n-build)
     (check-production-build! prod-build-name production-build)
@@ -130,7 +134,7 @@
     (cg/write-cljs-translation-file default-locale-path default-locale-code-string)
     (if (some #{default-lc} locales)
       (cg/write-cljs-translation-file locales-path locales-code-string)
-      (let [locales-code-string (cg/gen-locales-ns project locales-inc-default)]
+      (let [locales-code-string (cg/gen-locales-ns settings locales-inc-default)]
         (cg/write-cljs-translation-file locales-path locales-code-string)
         (cg/write-cljs-translation-file default-lc-translation-path default-lc-translations)))
     (lmain/warn "Configured project for default locale:" default-lc)
